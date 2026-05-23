@@ -12,7 +12,7 @@ from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.core.agent.message import TextPart
 from astrbot.core.message.components import At
 
-PLUGIN_VERSION: Final[str] = "0.1.0"
+PLUGIN_VERSION: Final[str] = "0.1.1"
 
 EXTRA_SILENT_REQUESTED: Final[str] = "_suanle_silent_requested"
 EXTRA_SILENT_REASON: Final[str] = "_suanle_silent_reason"
@@ -438,7 +438,7 @@ class Main(star.Star):
                 "没有合适插话时机, 或你不想理会当前请求时, 应优先调用 keep_silent.\n"
                 f"当前发送者/会话是否属于必须回复白名单: {'是' if must_reply else '否'}.\n"
                 "如果属于必须回复白名单, 禁止调用 keep_silent, 必须正常回复.\n"
-                "如果调用 keep_silent, 本轮最终不要输出任何面向用户的文字.\n"
+                "如果调用 keep_silent, 本轮会立即结束, 不需要继续生成任何最终回复.\n"
                 "</suanle_silence_policy>"
             )
             self._append_temp_text(req, policy)
@@ -493,7 +493,7 @@ class Main(star.Star):
         event: AstrMessageEvent,
         reason: str = "",
         confidence: float = 1.0,
-    ) -> str:
+    ) -> str | None:
         """保持沉默, 本轮不发送任何回复.
 
         Args:
@@ -515,7 +515,10 @@ class Main(star.Star):
         except (TypeError, ValueError):
             confidence_f = 1.0
         event.set_extra("_suanle_silent_confidence", max(0.0, min(1.0, confidence_f)))
-        return "ok: 已选择保持沉默. 本轮不要输出任何面向用户的内容."
+        self._debug(
+            f"沉默工具生效, Agent 将直接结束 reason={event.get_extra(EXTRA_SILENT_REASON, '')}"
+        )
+        return None
 
     # ------------------------------------------------------------------
     # 管理命令
@@ -622,15 +625,18 @@ class Main(star.Star):
             settings = cfg.get("provider_settings", {}) if isinstance(cfg, dict) else {}
             streaming = bool(settings.get("streaming_response", False))
             show_tool_status = bool(settings.get("show_tool_use_status", True))
+            show_tool_result = bool(settings.get("show_tool_call_result", False))
         except Exception as e:
             self._debug_compat("读取 provider 运行设置失败", e)
             streaming = False
             show_tool_status = False
-        if streaming or show_tool_status:
+            show_tool_result = False
+        if streaming or show_tool_status or show_tool_result:
             logger.warning(
                 "[算了不说了] 严格沉默建议关闭 provider_settings.streaming_response "
-                "和 provider_settings.show_tool_use_status; 否则模型调用 keep_silent 前 "
-                "可能已有流式内容或工具状态被发送."
+                "provider_settings.show_tool_use_status "
+                "和 provider_settings.show_tool_call_result; 否则模型调用 keep_silent 前 "
+                "可能已有流式内容, 工具状态或工具结果被发送."
             )
         self._warned_runtime_umo[umo] = None
         self._warned_runtime_umo.move_to_end(umo)

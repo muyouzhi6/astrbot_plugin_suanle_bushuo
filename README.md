@@ -52,8 +52,9 @@ git clone https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo.git
 
 - `streaming_response`: 流式输出已经发出的 token 无法被插件撤回。
 - `show_tool_use_status`: 如果开启, AstrBot 可能在执行 `keep_silent` 前发送工具调用状态。
+- `show_tool_call_result`: 如果开启, AstrBot 可能在工具结束时发送工具结果状态。
 
-黑名单强阻断不受这两项影响, 但 LLM 自主沉默想做到完全无痕, 就应关闭流式输出和工具调用状态展示。
+黑名单强阻断不受这些选项影响, 但 LLM 自主沉默想做到完全无痕, 就应关闭流式输出, 工具调用状态展示和工具结果展示。
 
 ## 配置项
 
@@ -72,7 +73,7 @@ git clone https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo.git
 | `blocked_context_window` | `20` | 后续 LLM 请求注入最近多少条黑名单消息 |
 | `blocked_context_ttl_seconds` | `86400` | 黑名单上下文缓存保留时间 |
 | `respect_recall_notice` | `true` | 收到撤回通知时只清理本插件缓存, 不阻断通知传播 |
-| `strict_non_streaming_warning` | `true` | 检测到流式输出或工具状态展示时输出 warning |
+| `strict_non_streaming_warning` | `true` | 检测到流式输出, 工具状态或工具结果展示时输出 warning |
 | `debug_log` | `false` | 输出调试日志 |
 
 ## 获取 UMO
@@ -109,7 +110,7 @@ git clone https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo.git
 - 黑名单用户的消息会被记录为 `<blocked_messages>`, 只作为事实背景, 不作为触发源。
 - 黑名单用户撤回消息后, 本插件会按 `UMO + message_id` 删除对应缓存。
 - `keep_silent` 依赖模型支持 function-calling/tools-use; 不支持 tool 的模型无法保证自主沉默。
+- `keep_silent` 成功调用后会直接结束本轮 Agent, 不要求模型再生成最终回复, 以避免空输出重试。
 - 如果其他插件在本插件之前直接 `event.send()`, 本插件无法撤回已经发送的平台消息。
 - `respect_recall_notice` 不建议关闭, 除非你明确知道自己在破坏撤回兼容链路。
-
 

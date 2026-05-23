@@ -82,7 +82,7 @@
     "description": "严格沉默运行时提示",
     "type": "bool",
     "default": true,
-    "hint": "检测到流式输出或工具调用状态展示时输出 warning。严格沉默建议关闭这两项。"
+    "hint": "检测到流式输出、工具调用状态或工具结果展示时输出 warning。严格沉默建议关闭这些展示项。"
   },
   "debug_log": {
     "description": "启用调试日志",

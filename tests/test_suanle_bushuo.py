@@ -128,6 +128,7 @@ class FakeContext:
             "provider_settings": {
                 "streaming_response": False,
                 "show_tool_use_status": False,
+                "show_tool_call_result": False,
             },
         }
 
@@ -316,7 +317,7 @@ class SuanlePluginTest(unittest.IsolatedAsyncioTestCase):
 
         result = await plugin.keep_silent(event, reason="没有必要回复")
 
-        self.assertIn("ok", result)
+        self.assertIsNone(result)
         self.assertTrue(event.get_extra("_suanle_silent_requested", False))
 
     async def test_group_uid_blacklist_matches_umo_and_group_id_forms(self):
@@ -501,9 +502,31 @@ class SuanlePluginTest(unittest.IsolatedAsyncioTestCase):
         result = await plugin.keep_silent(event, reason="无关", confidence=0.9)
         await plugin.on_llm_response(event, resp)
 
-        self.assertIn("ok", result)
+        self.assertIsNone(result)
         self.assertEqual(resp.completion_text, "")
         self.assertEqual(resp.reasoning_content, "")
+
+    async def test_keep_silent_success_returns_none_to_end_agent_loop(self):
+        plugin, _ = self.make_plugin()
+        event = FakeEvent(sender_id="101")
+
+        result = await plugin.keep_silent(event, reason="无关", confidence=0.9)
+
+        self.assertIsNone(result)
+        self.assertTrue(event.get_extra("_suanle_silent_requested", False))
+        self.assertEqual(event.get_extra("_suanle_silent_reason"), "无关")
+        self.assertEqual(event.get_extra("_suanle_silent_confidence"), 0.9)
+
+    async def test_silence_policy_does_not_request_empty_final_output(self):
+        plugin, _ = self.make_plugin()
+        event = FakeEvent(sender_id="101")
+        req = FakeReq()
+
+        await plugin.on_llm_request(event, req)
+
+        text = "\n".join(part.text for part in req.extra_user_content_parts)
+        self.assertIn("本轮会立即结束", text)
+        self.assertNotIn("最终不要输出任何面向用户的文字", text)
 
     async def test_keep_silent_clears_result_chain_without_empty_plain(self):
         plugin, _ = self.make_plugin()
