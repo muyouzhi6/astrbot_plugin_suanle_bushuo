@@ -12,7 +12,7 @@ from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.core.agent.message import TextPart
 from astrbot.core.message.components import At
 
-PLUGIN_VERSION: Final[str] = "0.1.1"
+PLUGIN_VERSION: Final[str] = "0.1.2"
 
 EXTRA_SILENT_REQUESTED: Final[str] = "_suanle_silent_requested"
 EXTRA_SILENT_REASON: Final[str] = "_suanle_silent_reason"

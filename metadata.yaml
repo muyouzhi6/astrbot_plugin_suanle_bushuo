@@ -3,7 +3,7 @@ display_name: 算了不说了
 desc: 让 LLM 可以选择沉默, 并让黑名单用户只能进入上下文但无法触发回复。
 repo: https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo
 author: 木有知
-version: v0.1.1
+version: v0.1.2
 support_platforms:
   - aiocqhttp
   - qq_official
