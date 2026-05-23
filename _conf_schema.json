@@ -1,0 +1,92 @@
+{
+  "enable": {
+    "description": "启用插件",
+    "type": "bool",
+    "default": true
+  },
+  "silence_tool_enable": {
+    "description": "启用 LLM 自主沉默工具 keep_silent",
+    "type": "bool",
+    "default": true,
+    "hint": "模型支持 function-calling/tools-use 时生效。"
+  },
+  "must_reply_umo": {
+    "description": "必须回复的 UMO 白名单",
+    "type": "list",
+    "default": [],
+    "hint": "命中这些会话时, keep_silent 会被拒绝。可用 /sid 获取 UMO。"
+  },
+  "must_reply_uid": {
+    "description": "必须回复的用户 ID 白名单",
+    "type": "list",
+    "default": [],
+    "hint": "命中这些用户时, keep_silent 会被拒绝, 黑名单也不会阻断。"
+  },
+  "must_reply_gid": {
+    "description": "必须回复的群 ID 白名单",
+    "type": "list",
+    "default": [],
+    "hint": "命中这些群时, keep_silent 会被拒绝。"
+  },
+  "blacklist_qq": {
+    "description": "QQ 号黑名单",
+    "type": "list",
+    "default": [],
+    "hint": "黑名单用户的消息会进入本插件临时上下文, 但无法触发 Bot 回复。"
+  },
+  "blacklist_uid": {
+    "description": "通用用户 ID 黑名单",
+    "type": "list",
+    "default": [],
+    "hint": "适用于非 QQ 平台或 sender_id 与 QQ 号不一致的场景。"
+  },
+  "blacklist_umo": {
+    "description": "会话级黑名单",
+    "type": "list",
+    "default": [],
+    "hint": "命中 UMO 时, 整个会话的普通消息都无法触发回复。"
+  },
+  "blacklist_group_uid": {
+    "description": "群内定向黑名单",
+    "type": "list",
+    "default": [],
+    "hint": "格式: <UMO>:<UID>. 也兼容 <群号>:<UID>。"
+  },
+  "protected_admins": {
+    "description": "保护 AstrBot 管理员",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后不会通过命令拉黑管理员, 配置里误填管理员也不会阻断。"
+  },
+  "blocked_context_window": {
+    "description": "黑名单上下文注入条数",
+    "type": "int",
+    "default": 20,
+    "min": 1,
+    "max": 200
+  },
+  "blocked_context_ttl_seconds": {
+    "description": "黑名单上下文缓存时间(秒)",
+    "type": "int",
+    "default": 86400,
+    "min": 60,
+    "max": 604800
+  },
+  "respect_recall_notice": {
+    "description": "兼容撤回通知",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后收到 group_recall/friend_recall 只清理本插件缓存, 不阻断通知传播。强烈建议保持开启。"
+  },
+  "strict_non_streaming_warning": {
+    "description": "严格沉默运行时提示",
+    "type": "bool",
+    "default": true,
+    "hint": "检测到流式输出或工具调用状态展示时输出 warning。严格沉默建议关闭这两项。"
+  },
+  "debug_log": {
+    "description": "启用调试日志",
+    "type": "bool",
+    "default": false
+  }
+}
