@@ -7,6 +7,7 @@ import types
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 PLUGIN_PATH = Path(__file__).resolve().parents[1] / "main.py"
 
@@ -18,7 +19,7 @@ def _decorator(*args: Any, **kwargs: Any):
     return wrap
 
 
-def install_astrbot_stubs() -> None:
+def install_astrbot_stubs() -> dict[str, types.ModuleType]:
     astrbot_mod = types.ModuleType("astrbot")
     api_mod = types.ModuleType("astrbot.api")
     event_mod = types.ModuleType("astrbot.api.event")
@@ -88,29 +89,27 @@ def install_astrbot_stubs() -> None:
     agent_message_mod.TextPart = TextPart
     components_mod.At = At
 
-    sys.modules.update(
-        {
-            "astrbot": astrbot_mod,
-            "astrbot.api": api_mod,
-            "astrbot.api.event": event_mod,
-            "astrbot.api.provider": provider_mod,
-            "astrbot.core": core_mod,
-            "astrbot.core.agent": agent_mod,
-            "astrbot.core.agent.message": agent_message_mod,
-            "astrbot.core.message": message_mod,
-            "astrbot.core.message.components": components_mod,
-        }
-    )
+    return {
+        "astrbot": astrbot_mod,
+        "astrbot.api": api_mod,
+        "astrbot.api.event": event_mod,
+        "astrbot.api.provider": provider_mod,
+        "astrbot.core": core_mod,
+        "astrbot.core.agent": agent_mod,
+        "astrbot.core.agent.message": agent_message_mod,
+        "astrbot.core.message": message_mod,
+        "astrbot.core.message.components": components_mod,
+    }
 
 
 def load_plugin_module():
-    install_astrbot_stubs()
-    spec = importlib.util.spec_from_file_location("suanle_main", PLUGIN_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    sys.modules["suanle_main"] = module
-    spec.loader.exec_module(module)
-    return module
+    with patch.dict(sys.modules, install_astrbot_stubs()):
+        spec = importlib.util.spec_from_file_location("suanle_main", PLUGIN_PATH)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        sys.modules["suanle_main"] = module
+        spec.loader.exec_module(module)
+        return module
 
 
 class FakeConfig(dict):
@@ -252,6 +251,21 @@ class SuanlePluginTest(unittest.IsolatedAsyncioTestCase):
         cfg = FakeConfig(config or {})
         plugin = self.mod.Main(FakeContext(core_config), cfg)
         return plugin, cfg
+
+    async def test_load_plugin_module_restores_sys_modules(self):
+        missing = object()
+        previous_astrbot = sys.modules.get("astrbot", missing)
+        sentinel_astrbot = types.ModuleType("astrbot")
+        sys.modules["astrbot"] = sentinel_astrbot
+        try:
+            load_plugin_module()
+            self.assertIs(sys.modules.get("astrbot"), sentinel_astrbot)
+            self.assertNotIn("suanle_main", sys.modules)
+        finally:
+            if previous_astrbot is missing:
+                sys.modules.pop("astrbot", None)
+            else:
+                sys.modules["astrbot"] = previous_astrbot
 
     async def test_blacklisted_message_is_stopped_and_recorded(self):
         plugin, _ = self.make_plugin({"blacklist_qq": ["100"]})
@@ -396,6 +410,56 @@ class SuanlePluginTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("first", text)
         self.assertIn("second", text)
         self.assertIn("third", text)
+
+    async def test_blocked_context_cache_has_umo_capacity_limit(self):
+        plugin, _ = self.make_plugin({"blocked_context_ttl_seconds": 86400})
+        now = time.time()
+        for index in range(self.mod.MAX_BLOCKED_UMO_CACHE + 1):
+            umo = f"aiocqhttp:group:{index}"
+            plugin._blocked_messages[umo] = [
+                self.mod.BlockedMessage(umo, "100", "A", str(index), "msg", now)
+            ]
+
+        plugin._cleanup_blocked_cache()
+
+        self.assertEqual(len(plugin._blocked_messages), self.mod.MAX_BLOCKED_UMO_CACHE)
+        self.assertNotIn("aiocqhttp:group:0", plugin._blocked_messages)
+        self.assertIn(
+            f"aiocqhttp:group:{self.mod.MAX_BLOCKED_UMO_CACHE}",
+            plugin._blocked_messages,
+        )
+
+    async def test_blocked_context_access_refreshes_cache_order(self):
+        plugin, _ = self.make_plugin({"blocked_context_ttl_seconds": 86400})
+        now = time.time()
+        for index in range(self.mod.MAX_BLOCKED_UMO_CACHE + 1):
+            umo = f"aiocqhttp:group:{index}"
+            plugin._blocked_messages[umo] = [
+                self.mod.BlockedMessage(umo, "100", "A", str(index), "msg", now)
+            ]
+
+        text = plugin._blocked_context_text("aiocqhttp:group:0")
+
+        self.assertIn("msg", text)
+        self.assertIn("aiocqhttp:group:0", plugin._blocked_messages)
+        self.assertNotIn("aiocqhttp:group:1", plugin._blocked_messages)
+
+    async def test_warned_runtime_umo_cache_has_capacity_limit(self):
+        plugin, _ = self.make_plugin()
+        for index in range(self.mod.MAX_WARNED_RUNTIME_UMO_CACHE + 1):
+            await plugin.on_llm_request(
+                FakeEvent(umo=f"aiocqhttp:group:{index}"),
+                FakeReq(),
+            )
+
+        self.assertEqual(
+            len(plugin._warned_runtime_umo), self.mod.MAX_WARNED_RUNTIME_UMO_CACHE
+        )
+        self.assertNotIn("aiocqhttp:group:0", plugin._warned_runtime_umo)
+        self.assertIn(
+            f"aiocqhttp:group:{self.mod.MAX_WARNED_RUNTIME_UMO_CACHE}",
+            plugin._warned_runtime_umo,
+        )
 
     async def test_agent_stop_requested_makes_llm_request_return(self):
         plugin, _ = self.make_plugin({"blacklist_qq": ["100"]})

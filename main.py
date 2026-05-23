@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -22,6 +23,8 @@ EXTRA_RECALL_STOP_REQUESTED: Final[str] = "agent_stop_requested"
 NOTICE_GROUP_RECALL: Final[str] = "group_recall"
 NOTICE_FRIEND_RECALL: Final[str] = "friend_recall"
 RECALL_NOTICE_TYPES: Final[set[str]] = {NOTICE_GROUP_RECALL, NOTICE_FRIEND_RECALL}
+MAX_BLOCKED_UMO_CACHE: Final[int] = 1024
+MAX_WARNED_RUNTIME_UMO_CACHE: Final[int] = 1024
 
 DEFAULTS: Final[dict[str, Any]] = {
     "enable": True,
@@ -76,7 +79,7 @@ class Main(star.Star):
         super().__init__(context)
         self._config = config if config is not None else {}
         self._blocked_messages: dict[str, list[BlockedMessage]] = {}
-        self._warned_runtime_umo: set[str] = set()
+        self._warned_runtime_umo: OrderedDict[str, None] = OrderedDict()
         logger.info(f"[算了不说了] 插件 v{PLUGIN_VERSION} 已加载")
 
     # ------------------------------------------------------------------
@@ -90,8 +93,8 @@ class Main(star.Star):
         if callable(getter):
             try:
                 return getter(key, DEFAULTS.get(key))
-            except TypeError:
-                pass
+            except TypeError as e:
+                self._debug_compat(f"读取配置项 {key} 时回退到属性访问", e)
         return getattr(self._config, key, DEFAULTS.get(key))
 
     def _cfg_bool(self, key: str) -> bool:
@@ -128,9 +131,30 @@ class Main(star.Star):
         if callable(saver):
             saver()
 
+    def _debug_enabled(self) -> bool:
+        if isinstance(self._config, dict):
+            return bool(self._config.get("debug_log", DEFAULTS["debug_log"]))
+        getter = getattr(self._config, "get", None)
+        if callable(getter):
+            try:
+                return bool(getter("debug_log", DEFAULTS["debug_log"]))
+            except TypeError:
+                try:
+                    return bool(getter("debug_log"))
+                except Exception:
+                    return bool(
+                        getattr(self._config, "debug_log", DEFAULTS["debug_log"])
+                    )
+            except Exception:
+                return bool(getattr(self._config, "debug_log", DEFAULTS["debug_log"]))
+        return bool(getattr(self._config, "debug_log", DEFAULTS["debug_log"]))
+
     def _debug(self, message: str) -> None:
-        if self._cfg_bool("debug_log"):
+        if self._debug_enabled():
             logger.debug(f"[算了不说了] {message}")
+
+    def _debug_compat(self, message: str, error: BaseException) -> None:
+        self._debug(f"{message}: {type(error).__name__}: {error}")
 
     # ------------------------------------------------------------------
     # 事件与 ID 工具
@@ -142,8 +166,7 @@ class Main(star.Star):
             return ""
         return str(value).strip()
 
-    @staticmethod
-    def _raw_get(raw: Any, key: str, default: Any = None) -> Any:
+    def _raw_get(self, raw: Any, key: str, default: Any = None) -> Any:
         if raw is None:
             return default
         if isinstance(raw, dict):
@@ -158,39 +181,41 @@ class Main(star.Star):
             except TypeError:
                 try:
                     return getter(key)
-                except Exception:
+                except Exception as e:
+                    self._debug_compat(f"读取 raw_message.{key} 失败", e)
                     return default
-            except Exception:
+            except Exception as e:
+                self._debug_compat(f"读取 raw_message.{key} 失败", e)
                 return default
         return default
 
-    @classmethod
-    def _extract_message_id(cls, event: AstrMessageEvent) -> str | None:
+    def _extract_message_id(self, event: AstrMessageEvent) -> str | None:
         try:
             raw = getattr(event.message_obj, "raw_message", None)
-            raw_msg_id = cls._normalize_id(cls._raw_get(raw, "message_id"))
+            raw_msg_id = self._normalize_id(self._raw_get(raw, "message_id"))
             if raw_msg_id:
                 return raw_msg_id
-            msg_id = cls._normalize_id(getattr(event.message_obj, "message_id", None))
+            msg_id = self._normalize_id(getattr(event.message_obj, "message_id", None))
             return msg_id or None
-        except Exception:
+        except Exception as e:
+            self._debug_compat("提取 message_id 失败", e)
             return None
 
-    @classmethod
-    def _is_recall_notice(cls, event: AstrMessageEvent) -> tuple[bool, str | None]:
+    def _is_recall_notice(self, event: AstrMessageEvent) -> tuple[bool, str | None]:
         try:
             raw = getattr(event.message_obj, "raw_message", None)
             if not raw:
                 return False, None
-            post_type = cls._raw_get(raw, "post_type")
+            post_type = self._raw_get(raw, "post_type")
             if post_type not in (None, "notice"):
                 return False, None
-            notice_type = cls._raw_get(raw, "notice_type")
+            notice_type = self._raw_get(raw, "notice_type")
             if notice_type not in RECALL_NOTICE_TYPES:
                 return False, None
-            msg_id = cls._normalize_id(cls._raw_get(raw, "message_id"))
+            msg_id = self._normalize_id(self._raw_get(raw, "message_id"))
             return bool(msg_id), msg_id or None
-        except Exception:
+        except Exception as e:
+            self._debug_compat("判断撤回 notice 失败", e)
             return False, None
 
     @staticmethod
@@ -206,20 +231,19 @@ class Main(star.Star):
                     outline = self._clean_one_line(getter())
                     if outline:
                         return outline
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._debug_compat(f"调用 {getter_name} 获取消息摘要失败", e)
         return self._clean_one_line(getattr(event, "message_str", ""))
 
-    @staticmethod
-    def _get_messages(event: AstrMessageEvent) -> list[Any]:
+    def _get_messages(self, event: AstrMessageEvent) -> list[Any]:
         getter = getattr(event, "get_messages", None)
         if callable(getter):
             try:
                 messages = getter()
                 if isinstance(messages, list):
                     return messages
-            except Exception:
-                pass
+            except Exception as e:
+                self._debug_compat("调用 get_messages 获取消息组件失败", e)
         message_obj = getattr(event, "message_obj", None)
         messages = getattr(message_obj, "message", None)
         return messages if isinstance(messages, list) else []
@@ -228,7 +252,8 @@ class Main(star.Star):
         try:
             cfg = self.context.get_config()
             admins = cfg.get("admins_id", []) if isinstance(cfg, dict) else []
-        except Exception:
+        except Exception as e:
+            self._debug_compat("读取 AstrBot 管理员列表失败", e)
             admins = []
         return {self._normalize_id(item) for item in admins if self._normalize_id(item)}
 
@@ -282,6 +307,14 @@ class Main(star.Star):
                 self._blocked_messages[umo] = kept
             else:
                 del self._blocked_messages[umo]
+        while len(self._blocked_messages) > MAX_BLOCKED_UMO_CACHE:
+            removed_umo = next(iter(self._blocked_messages))
+            del self._blocked_messages[removed_umo]
+            self._debug(f"黑名单上下文缓存超过上限, 已淘汰最旧 UMO: {removed_umo}")
+
+    def _touch_blocked_umo(self, umo: str) -> None:
+        if umo in self._blocked_messages:
+            self._blocked_messages[umo] = self._blocked_messages.pop(umo)
 
     def _record_blocked_message(self, event: AstrMessageEvent) -> None:
         content = self._message_outline(event)
@@ -299,6 +332,7 @@ class Main(star.Star):
             timestamp=time.time(),
         )
         self._blocked_messages.setdefault(umo, []).append(item)
+        self._touch_blocked_umo(umo)
         self._cleanup_blocked_cache()
         self._debug(
             f"记录黑名单消息 umo={umo} uid={item.sender_id} msg_id={item.message_id}"
@@ -319,6 +353,7 @@ class Main(star.Star):
         return before - len(self._blocked_messages.get(umo, []))
 
     def _blocked_context_text(self, umo: str) -> str:
+        self._touch_blocked_umo(umo)
         self._cleanup_blocked_cache()
         window = max(1, self._cfg_int("blocked_context_window"))
         messages = self._blocked_messages.get(umo, [])[-window:]
@@ -333,15 +368,15 @@ class Main(star.Star):
             + "\n</blocked_messages>"
         )
 
-    @staticmethod
-    def _append_temp_text(req: ProviderRequest, text: str) -> None:
+    def _append_temp_text(self, req: ProviderRequest, text: str) -> None:
         try:
             part = TextPart(text=text)
             mark_as_temp = getattr(part, "mark_as_temp", None)
             if callable(mark_as_temp):
                 part = mark_as_temp() or part
             req.extra_user_content_parts.append(part)
-        except Exception:
+        except Exception as e:
+            self._debug_compat("写入临时 LLM 上下文失败, 已回退到 system_prompt", e)
             req.system_prompt = (req.system_prompt or "") + f"\n\n{text}"
 
     # ------------------------------------------------------------------
@@ -587,7 +622,8 @@ class Main(star.Star):
             settings = cfg.get("provider_settings", {}) if isinstance(cfg, dict) else {}
             streaming = bool(settings.get("streaming_response", False))
             show_tool_status = bool(settings.get("show_tool_use_status", True))
-        except Exception:
+        except Exception as e:
+            self._debug_compat("读取 provider 运行设置失败", e)
             streaming = False
             show_tool_status = False
         if streaming or show_tool_status:
@@ -596,4 +632,7 @@ class Main(star.Star):
                 "和 provider_settings.show_tool_use_status; 否则模型调用 keep_silent 前 "
                 "可能已有流式内容或工具状态被发送."
             )
-        self._warned_runtime_umo.add(umo)
+        self._warned_runtime_umo[umo] = None
+        self._warned_runtime_umo.move_to_end(umo)
+        while len(self._warned_runtime_umo) > MAX_WARNED_RUNTIME_UMO_CACHE:
+            self._warned_runtime_umo.popitem(last=False)
