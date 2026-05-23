@@ -1,7 +1,6 @@
 name: astrbot_plugin_suanle_bushuo
 display_name: 算了不说了
-short_desc: 让 LLM 可以选择沉默, 并让黑名单用户只能进入上下文但无法触发回复。
-desc: 支持 keep_silent 自主沉默工具, QQ/UID/UMO 黑名单阻断, 黑名单上下文注入, 并兼容 context_aware, wakepro 和 recall_cancel。
+desc: 让 LLM 可以选择沉默, 并让黑名单用户只能进入上下文但无法触发回复。
 repo: https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo
 author: 木有知
 version: v0.1.0
