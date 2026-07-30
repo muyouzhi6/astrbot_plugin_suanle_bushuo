@@ -12,7 +12,12 @@ from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.core.agent.message import TextPart
 from astrbot.core.message.components import At
 
-PLUGIN_VERSION: Final[str] = "0.1.2"
+try:
+    from astrbot.core.pipeline.process_stage import follow_up as follow_up_stage
+except ImportError:
+    follow_up_stage = None
+
+PLUGIN_VERSION: Final[str] = "0.1.4"
 
 EXTRA_SILENT_REQUESTED: Final[str] = "_suanle_silent_requested"
 EXTRA_SILENT_REASON: Final[str] = "_suanle_silent_reason"
@@ -80,6 +85,7 @@ class Main(star.Star):
         self._config = config if config is not None else {}
         self._blocked_messages: dict[str, list[BlockedMessage]] = {}
         self._warned_runtime_umo: OrderedDict[str, None] = OrderedDict()
+        self._follow_up_compat_warned = False
         logger.info(f"[算了不说了] 插件 v{PLUGIN_VERSION} 已加载")
 
     # ------------------------------------------------------------------
@@ -269,6 +275,57 @@ class Main(star.Star):
             or bool(gid and gid in self._cfg_list("must_reply_gid"))
             or bool(umo and umo in self._cfg_list("must_reply_umo"))
         )
+
+    def _warn_follow_up_compat(self, detail: str) -> None:
+        if self._follow_up_compat_warned:
+            return
+        self._follow_up_compat_warned = True
+        logger.warning(
+            "[算了不说了] keep_silent follow-up 终止保护与当前 AstrBot "
+            "运行时不兼容: %s. 插件不会修改 Core, 本轮仍按沉默流程结束.",
+            detail,
+        )
+
+    def _release_pending_follow_ups(self, event: AstrMessageEvent) -> int:
+        if follow_up_stage is None:
+            self._warn_follow_up_compat("无法导入 follow_up process stage")
+            return 0
+        active_runners = getattr(follow_up_stage, "_ACTIVE_AGENT_RUNNERS", None)
+        if not isinstance(active_runners, dict):
+            self._warn_follow_up_compat("缺少 _ACTIVE_AGENT_RUNNERS 映射")
+            return 0
+        runner = active_runners.get(event.unified_msg_origin)
+        if runner is None:
+            return 0
+
+        missing = object()
+        pending = getattr(runner, "_pending_follow_ups", missing)
+        if pending is missing:
+            self._warn_follow_up_compat("active runner 缺少 _pending_follow_ups")
+            return 0
+        if not pending:
+            return 0
+
+        try:
+            pending_count = len(pending)
+        except TypeError:
+            pending_count = 1
+
+        resolver = getattr(runner, "_resolve_unconsumed_follow_ups", None)
+        if not callable(resolver):
+            self._warn_follow_up_compat(
+                "active runner 缺少 _resolve_unconsumed_follow_ups()"
+            )
+            return 0
+        try:
+            resolver()
+        except Exception as e:
+            self._warn_follow_up_compat(
+                "调用 _resolve_unconsumed_follow_ups() 失败: "
+                f"{type(e).__name__}: {e}"
+            )
+            return 0
+        return pending_count
 
     def _is_blacklisted(self, event: AstrMessageEvent) -> bool:
         if not self._cfg_bool("enable"):
@@ -507,6 +564,13 @@ class Main(star.Star):
         if self._must_reply_event(event):
             return (
                 "error: 当前发送者或会话在必须回复白名单中, 不能保持沉默, 请正常回复."
+            )
+        released_follow_ups = self._release_pending_follow_ups(event)
+        if released_follow_ups:
+            logger.info(
+                "[算了不说了] keep_silent 结束旧 Agent 前已释放 %d 条 "
+                "未消费 follow-up, 后续原始事件将独立处理",
+                released_follow_ups,
             )
         event.set_extra(EXTRA_SILENT_REQUESTED, True)
         event.set_extra(EXTRA_SILENT_REASON, self._clean_one_line(reason))

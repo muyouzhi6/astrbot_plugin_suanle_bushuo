@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 import time
@@ -29,6 +30,11 @@ def install_astrbot_stubs() -> dict[str, types.ModuleType]:
     agent_message_mod = types.ModuleType("astrbot.core.agent.message")
     message_mod = types.ModuleType("astrbot.core.message")
     components_mod = types.ModuleType("astrbot.core.message.components")
+    pipeline_mod = types.ModuleType("astrbot.core.pipeline")
+    process_stage_mod = types.ModuleType("astrbot.core.pipeline.process_stage")
+    follow_up_mod = types.ModuleType("astrbot.core.pipeline.process_stage.follow_up")
+    follow_up_mod._ACTIVE_AGENT_RUNNERS = {}
+    process_stage_mod.follow_up = follow_up_mod
 
     class Logger:
         def info(self, *args, **kwargs):
@@ -99,6 +105,9 @@ def install_astrbot_stubs() -> dict[str, types.ModuleType]:
         "astrbot.core.agent.message": agent_message_mod,
         "astrbot.core.message": message_mod,
         "astrbot.core.message.components": components_mod,
+        "astrbot.core.pipeline": pipeline_mod,
+        "astrbot.core.pipeline.process_stage": process_stage_mod,
+        "astrbot.core.pipeline.process_stage.follow_up": follow_up_mod,
     }
 
 
@@ -517,6 +526,44 @@ class SuanlePluginTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.get_extra("_suanle_silent_reason"), "无关")
         self.assertEqual(event.get_extra("_suanle_silent_confidence"), 0.9)
 
+    async def test_keep_silent_releases_pending_follow_up_before_terminal_silence(self):
+        plugin, _ = self.make_plugin()
+        event = FakeEvent(sender_id="101")
+
+        class Ticket:
+            def __init__(self):
+                self.consumed = False
+                self.resolved = asyncio.Event()
+
+        class Runner:
+            def __init__(self, ticket):
+                self._pending_follow_ups = [ticket]
+
+            def _resolve_unconsumed_follow_ups(self):
+                follow_ups = self._pending_follow_ups
+                self._pending_follow_ups = []
+                for follow_up in follow_ups:
+                    follow_up.resolved.set()
+
+        ticket = Ticket()
+        runner = Runner(ticket)
+        self.mod.follow_up_stage._ACTIVE_AGENT_RUNNERS[event.unified_msg_origin] = (
+            runner
+        )
+
+        await plugin.on_using_llm_tool(
+            event, FakeTool("keep_silent"), {"reason": "插不上话"}
+        )
+        result = await plugin.keep_silent(event, reason="插不上话", confidence=0.9)
+
+        self.assertIsNone(result)
+        self.assertTrue(event.get_extra("_suanle_silent_requested", False))
+        self.assertEqual(event.get_extra("_suanle_silent_reason"), "插不上话")
+        self.assertEqual(runner._pending_follow_ups, [])
+        self.assertTrue(ticket.resolved.is_set())
+        self.assertFalse(ticket.consumed)
+        self.assertFalse(plugin._must_reply_event(event))
+
     async def test_silence_policy_does_not_request_empty_final_output(self):
         plugin, _ = self.make_plugin()
         event = FakeEvent(sender_id="101")
@@ -548,6 +595,24 @@ class SuanlePluginTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("error", result)
         self.assertFalse(event.get_extra("_suanle_silent_requested", False))
+
+    async def test_must_reply_does_not_release_pending_follow_up(self):
+        plugin, _ = self.make_plugin({"must_reply_uid": ["101"]})
+        event = FakeEvent(sender_id="101")
+        ticket = types.SimpleNamespace(consumed=False, resolved=asyncio.Event())
+        runner = types.SimpleNamespace(
+            _pending_follow_ups=[ticket],
+            _resolve_unconsumed_follow_ups=lambda: ticket.resolved.set(),
+        )
+        self.mod.follow_up_stage._ACTIVE_AGENT_RUNNERS[event.unified_msg_origin] = (
+            runner
+        )
+
+        result = await plugin.keep_silent(event, reason="无关")
+
+        self.assertIn("必须回复白名单", result)
+        self.assertEqual(runner._pending_follow_ups, [ticket])
+        self.assertFalse(ticket.resolved.is_set())
 
     async def test_decorating_result_clears_silent_output(self):
         plugin, _ = self.make_plugin()

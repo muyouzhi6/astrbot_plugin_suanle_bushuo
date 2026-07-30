@@ -14,6 +14,7 @@
 ## 功能亮点
 
 - LLM 自主沉默: 提供 `keep_silent` tool, 模型可以在不想回复, 不该插话, 或当前话题与自己无关时保持沉默。
+- `keep_silent` 终止保护: 仅在该工具即将结束旧 Agent 时, 释放尚未被旧 Agent 消费的 follow-up, 让后续原始事件独立处理。
 - 必须回复白名单: 支持 `must_reply_umo`, `must_reply_uid`, `must_reply_gid`, 命中后模型不能使用沉默工具。
 - 黑名单强阻断: 支持 QQ 号, 通用 UID, UMO 会话, 群内定向黑名单, 命中后 @ Bot, 指令, wakepro 主动唤醒都不会触发回复。
 - 黑名单上下文注入: 被拉黑用户的消息仍会以 `<blocked_messages>` 临时上下文提供给 LLM, 避免群聊信息割裂。
@@ -25,6 +26,7 @@
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
 | AstrBot | `>=4.24.0,<5.0.0` | 依赖 `extra_user_content_parts.mark_as_temp()` 避免临时上下文写入历史 |
+| `keep_silent` follow-up 终止保护 | `v4.26.8` 已验证 | 依赖当前 Core 的私有 runner 状态, 不修改 Core; 接口不兼容时仅记录一次 warning |
 | context_aware | 兼容 | 黑名单上下文由本插件独立维护, 不调用 context_aware 清理接口 |
 | wakepro | 兼容 | 本插件黑名单监听优先级为 `100000`, 高于 wakepro 当前 `99999` |
 | recall_cancel | 兼容 | LLM hook 优先级为 `90`, 低于 recall_cancel 的 `100`; 撤回 notice 不会被吞 |
@@ -111,6 +113,6 @@ git clone https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo.git
 - 黑名单用户撤回消息后, 本插件会按 `UMO + message_id` 删除对应缓存。
 - `keep_silent` 依赖模型支持 function-calling/tools-use; 不支持 tool 的模型无法保证自主沉默。
 - `keep_silent` 成功调用后会直接结束本轮 Agent, 不要求模型再生成最终回复, 以避免空输出重试。
+- 如果 `keep_silent` 执行前已经捕获 follow-up, 插件会先释放未消费票据, 再让旧 Agent 正常沉默结束; 后续消息仍以原始事件独立进入流程, 不会被压成旧 Agent 的纯文本工具结果。
 - 如果其他插件在本插件之前直接 `event.send()`, 本插件无法撤回已经发送的平台消息。
 - `respect_recall_notice` 不建议关闭, 除非你明确知道自己在破坏撤回兼容链路。
-
