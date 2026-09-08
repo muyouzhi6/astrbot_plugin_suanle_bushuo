@@ -1,6 +1,7 @@
 name: astrbot_plugin_suanle_bushuo
 display_name: 算了不说了
-desc: 让 LLM 可以选择沉默, 并让黑名单用户只能进入上下文但无法触发回复。
+short_desc: 让 Bot 自主选择不回复，少些乱插话；忽略某人时也能保留聊天背景。
+desc: 让 Bot 更像真人，拥有主动不回复的选择：没有合适的插话时机或不想回应时，可以自主保持沉默；也支持管理员指定忽略对象，保留其近期消息作为上下文，同时阻止这些消息触发回复。
 repo: https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo
 author: 木有知
 version: v0.1.4

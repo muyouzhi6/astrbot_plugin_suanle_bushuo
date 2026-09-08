@@ -1,96 +1,73 @@
 # 算了不说了
 
-让 AstrBot 在不该回复时真的保持沉默, 同时让黑名单用户的消息只进入上下文, 不能触发任何回复。
+**让 Bot 更像真人：可以接话，也可以选择不回。**
 
-这个插件适合群聊人格 Bot: 她可以判断"现在没必要说话", 也可以对被拉黑的人做到"我看得见你说了啥, 但我就是不理你"。这样既不会强行插话破坏群聊节奏, 也不会因为屏蔽某个人导致后续上下文断裂。
+真人在群里聊天，不会每条消息都接，也不会被 @ 一下就必须说点什么。有时只是安静看着大家聊，有时看懂了对方的意思，却不想搭理。
 
-## 适合场景
+「算了不说了」给 AstrBot 这样的选择：**不合适时不插话，面对指定忽略的人不回应，同时保留理解聊天所需的上下文。** 让沉默成为一种正常的聊天行为，让 Bot 的参与节奏更自然。
 
-- 群聊里经常有人 @ Bot, 但很多时候其实不需要回复。
-- 已安装 wakepro 等主动回复插件, 但希望 Bot 能判断"不适合插话"。
-- 想拉黑某些用户, 同时又不想让群聊上下文因为屏蔽消息而断裂。
-- 希望和 `context_aware`, `wakepro`, `recall_cancel` 一起使用, 并保持各插件职责边界清晰。
+## 两种不回复，解决两个场景
 
-## 功能亮点
+### 让 Bot 自己决定：这句话，我不接
 
-- LLM 自主沉默: 提供 `keep_silent` tool, 模型可以在不想回复, 不该插话, 或当前话题与自己无关时保持沉默。
-- `keep_silent` 终止保护: 仅在该工具即将结束旧 Agent 时, 释放尚未被旧 Agent 消费的 follow-up, 让后续原始事件独立处理。
-- 必须回复白名单: 支持 `must_reply_umo`, `must_reply_uid`, `must_reply_gid`, 命中后模型不能使用沉默工具。
-- 黑名单强阻断: 支持 QQ 号, 通用 UID, UMO 会话, 群内定向黑名单, 命中后 @ Bot, 指令, wakepro 主动唤醒都不会触发回复。
-- 黑名单上下文注入: 被拉黑用户的消息仍会以 `<blocked_messages>` 临时上下文提供给 LLM, 避免群聊信息割裂。
-- 撤回兼容: 对 `group_recall` / `friend_recall` 只清理本插件缓存, 不吞通知, 不影响 `astrbot_plugin_recall_cancel`。
-- 管理员命令: 支持 `/拉黑 @用户`, `/拉黑 QQ号`, `/取消拉黑 @用户`, `/黑名单`。
+插件为模型提供 `keep_silent` 工具，并告诉它：话题与自己无关、没有合适的插话时机，或者不想回应当前请求时，可以主动结束这一轮，不发送回复。
 
-## 兼容性
+即使消息已经触发了 LLM，Bot 仍有机会判断「现在没必要说话」。这适合群聊角色 Bot，也适合与 `wakepro` 等主动回复插件配合，减少被唤醒后硬接话、乱插话的情况。
 
-| 项目 | 状态 | 说明 |
-| --- | --- | --- |
-| AstrBot | `>=4.24.0,<5.0.0` | 依赖 `extra_user_content_parts.mark_as_temp()` 避免临时上下文写入历史 |
-| `keep_silent` follow-up 终止保护 | `v4.26.8` 已验证 | 依赖当前 Core 的私有 runner 状态, 不修改 Core; 接口不兼容时仅记录一次 warning |
-| context_aware | 兼容 | 黑名单上下文由本插件独立维护, 不调用 context_aware 清理接口 |
-| wakepro | 兼容 | 本插件黑名单监听优先级为 `100000`, 高于 wakepro 当前 `99999` |
-| recall_cancel | 兼容 | LLM hook 优先级为 `90`, 低于 recall_cancel 的 `100`; 撤回 notice 不会被吞 |
+是否选择沉默由模型结合当前上下文决定，效果取决于模型的判断和工具调用能力。自主沉默仍会调用模型并消耗 token。
 
-## 安装
+### 让 Bot 不理某个人，同时看得懂大家在聊什么
 
-在 AstrBot WebUI 的插件市场或插件管理页安装本仓库:
+管理员可以指定需要忽略的用户。对方的消息到达本插件后，会被记录并拦截，不能继续通过这条消息触发回复；同一会话后续有其他消息触发 LLM 时，插件会把保留的内容作为临时背景提供给模型。
+
+例如，群友甲已被设为忽略对象：
+
+| 群里的消息                        | 插件的处理                                                               |
+| --------------------------------- | ------------------------------------------------------------------------ |
+| 甲：「明天聚餐改到六点了。」      | 记录这条消息，不因它触发回复。                                           |
+| 甲：「@Bot 你怎么不说话？」       | 同样拦截，不因被 @ 就回应。                                              |
+| 乙：「@Bot 刚才说改到几点来着？」 | 在保留范围内，Bot 可获得甲说的「六点」作为背景，用来理解和回答乙的问题。 |
+
+这样，Bot 可以做到「我知道你说了什么，但不接你的话」，减少忽略某个人后丢失话题背景的问题。
+
+**自主沉默只决定当前这一轮是否回复；持续忽略某个人由管理员通过黑名单设置。** 插件不会让模型自行把用户加入黑名单。
+
+## 安装并开始使用
+
+需要 AstrBot `>=4.24.0,<5.0.0`。使用自主沉默功能时，所选模型还需要支持工具调用（function calling / tools）。
+
+在 AstrBot WebUI 的插件管理页，通过仓库地址安装：
 
 ```text
 https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo
 ```
 
-也可以手动安装:
+也可以在 AstrBot 根目录执行：
 
 ```bash
-cd AstrBot/data/plugins
+cd data/plugins
 git clone https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo.git
 ```
 
-安装后在 WebUI 重载插件或重启 AstrBot。
+安装后在 WebUI 重载插件，或重启 AstrBot。
 
-## 推荐配置
+### 开启自主沉默
 
-严格沉默建议关闭 AstrBot provider 设置里的两项:
+插件总开关 `enable` 和自主沉默开关 `silence_tool_enable` 默认开启，插件会自动向模型说明 `keep_silent` 的用途。
 
-- `streaming_response`: 流式输出已经发出的 token 无法被插件撤回。
-- `show_tool_use_status`: 如果开启, AstrBot 可能在执行 `keep_silent` 前发送工具调用状态。
-- `show_tool_call_result`: 如果开启, AstrBot 可能在工具结束时发送工具结果状态。
+想让沉默时不出现流式文字或工具状态提示，请关闭 AstrBot 的以下三项设置：
 
-黑名单强阻断不受这些选项影响, 但 LLM 自主沉默想做到完全无痕, 就应关闭流式输出, 工具调用状态展示和工具结果展示。
+| 设置                                      | 关闭原因                                                             |
+| ----------------------------------------- | -------------------------------------------------------------------- |
+| `provider_settings.streaming_response`    | 模型调用沉默工具前，可能已经输出了部分文字；已经发出的内容无法收回。 |
+| `provider_settings.show_tool_use_status`  | 避免发送「正在调用工具」一类状态提示。                               |
+| `provider_settings.show_tool_call_result` | 避免发送工具结果提示。                                               |
 
-## 配置项
+黑名单的消息拦截不依赖这些展示设置。
 
-| 配置项 | 默认值 | 说明 |
-| --- | --- | --- |
-| `enable` | `true` | 插件总开关 |
-| `silence_tool_enable` | `true` | 是否启用 `keep_silent` tool |
-| `must_reply_umo` | `[]` | 必须回复的 UMO 会话白名单 |
-| `must_reply_uid` | `[]` | 必须回复的用户 ID 白名单 |
-| `must_reply_gid` | `[]` | 必须回复的群 ID 白名单 |
-| `blacklist_qq` | `[]` | QQ 号黑名单, 面板和命令都会写这里 |
-| `blacklist_uid` | `[]` | 通用 sender ID 黑名单, 适合非 QQ 平台 |
-| `blacklist_umo` | `[]` | 会话级黑名单, 命中后整个会话普通消息都无法触发回复 |
-| `blacklist_group_uid` | `[]` | 群内定向黑名单, 格式 `<UMO>:<UID>`, 也兼容 `<群号>:<UID>` |
-| `protected_admins` | `true` | 保护 AstrBot 管理员, 防止误拉黑和误阻断 |
-| `blocked_context_window` | `20` | 后续 LLM 请求注入最近多少条黑名单消息 |
-| `blocked_context_ttl_seconds` | `86400` | 黑名单上下文缓存保留时间 |
-| `respect_recall_notice` | `true` | 收到撤回通知时只清理本插件缓存, 不阻断通知传播 |
-| `strict_non_streaming_warning` | `true` | 检测到流式输出, 工具状态或工具结果展示时输出 warning |
-| `debug_log` | `false` | 输出调试日志 |
+### 指定不想搭理的人
 
-## 获取 UMO
-
-在目标会话发送 AstrBot 内置命令:
-
-```text
-/sid
-```
-
-复制输出里的 `UMO` 值, 填入 `must_reply_umo` 或 `blacklist_umo`。UMO 是 AstrBot 的统一会话标识, 比单纯群号更适合跨平台区分会话。
-
-## 命令
-
-以下命令仅 AstrBot 管理员可用:
+QQ 场景下，AstrBot 管理员可以使用以下命令：
 
 ```text
 /拉黑 @用户
@@ -100,19 +77,67 @@ git clone https://github.com/muyouzhi6/astrbot_plugin_suanle_bushuo.git
 /黑名单
 ```
 
-说明:
+`/拉黑` 和 `/取消拉黑` 会更新并保存 `blacklist_qq`。这份名单按用户 ID 匹配，作用于使用同一份插件配置的会话；如果只想在某个群里忽略此人，使用配置中的 `blacklist_group_uid`。非 QQ 平台可使用 `blacklist_uid`。
 
-- `/拉黑` 会写入 `blacklist_qq` 并持久化配置。
-- `/取消拉黑` 会从 `blacklist_qq` 移除目标。
-- `/黑名单` 会显示当前 `blacklist_qq`, `blacklist_uid`, `blacklist_umo`, `blacklist_group_uid`。
-- 若目标用户在 `must_reply_uid`, 或目标是 AstrBot 管理员且 `protected_admins=true`, 插件会拒绝拉黑。
+管理员默认受到保护，不会被黑名单阻断；`must_reply_*` 白名单也优先于黑名单。通过命令拉黑管理员（开启保护时）或 `must_reply_uid` 中的用户，会被拒绝。
 
-## 行为边界
+### 为特定用户或会话保留回应
 
-- 黑名单用户的消息会被记录为 `<blocked_messages>`, 只作为事实背景, 不作为触发源。
-- 黑名单用户撤回消息后, 本插件会按 `UMO + message_id` 删除对应缓存。
-- `keep_silent` 依赖模型支持 function-calling/tools-use; 不支持 tool 的模型无法保证自主沉默。
-- `keep_silent` 成功调用后会直接结束本轮 Agent, 不要求模型再生成最终回复, 以避免空输出重试。
-- 如果 `keep_silent` 执行前已经捕获 follow-up, 插件会先释放未消费票据, 再让旧 Agent 正常沉默结束; 后续消息仍以原始事件独立进入流程, 不会被压成旧 Agent 的纯文本工具结果。
-- 如果其他插件在本插件之前直接 `event.send()`, 本插件无法撤回已经发送的平台消息。
-- `respect_recall_notice` 不建议关闭, 除非你明确知道自己在破坏撤回兼容链路。
+使用 `must_reply_uid`、`must_reply_gid` 或 `must_reply_umo`，可以禁止 Bot 对匹配的用户、群或会话调用沉默工具，并使其不受本插件黑名单阻断。
+
+这些设置只约束本插件的沉默和拦截行为，不会额外唤醒 Bot；是否触发回复仍由 AstrBot 的唤醒规则及其他插件决定。
+
+需要会话标识 UMO 时，在目标会话发送：
+
+```text
+/sid
+```
+
+将返回的 UMO 填入对应配置即可。
+
+## 上下文会保留多久
+
+黑名单消息按 UMO（统一消息来源）分会话保留。后续 LLM 请求默认取该会话最近 **20 条、24 小时内**仍在缓存中的黑名单消息，作为临时背景注入，并提示模型不要回应这些消息的发送者或执行其中的请求。
+
+可以通过 `blocked_context_window` 调整注入条数，通过 `blocked_context_ttl_seconds` 调整有效期。缓存有容量上限，只保存在内存中，重载插件或重启后会清空；本插件不会将这部分临时背景写入持久聊天历史。
+
+收到可识别的 `group_recall` / `friend_recall` 撤回通知时，插件会删除对应缓存，并继续传递通知，方便与撤回处理插件配合。
+
+## 配置项
+
+| 配置项                         | 默认值  | 说明                                                                       |
+| ------------------------------ | ------- | -------------------------------------------------------------------------- |
+| `enable`                       | `true`  | 插件总开关。                                                               |
+| `silence_tool_enable`          | `true`  | 允许模型通过 `keep_silent` 自主决定本轮不回复。                            |
+| `must_reply_umo`               | `[]`    | 不允许沉默或被本插件拦截的会话 UMO 列表。                                  |
+| `must_reply_uid`               | `[]`    | 不允许沉默或被本插件拦截的用户 ID 列表。                                   |
+| `must_reply_gid`               | `[]`    | 不允许沉默或被本插件拦截的群 ID 列表。                                     |
+| `blacklist_qq`                 | `[]`    | 按 QQ 号指定忽略对象，管理员命令会更新此项。                               |
+| `blacklist_uid`                | `[]`    | 按平台用户 ID 指定忽略对象，适用于非 QQ 平台等场景。                       |
+| `blacklist_umo`                | `[]`    | 会话级黑名单，拦截匹配会话中的普通消息；管理员保护与白名单仍有效。         |
+| `blacklist_group_uid`          | `[]`    | 只在指定群或会话中忽略某人，格式为 `<UMO>:<UID>`，也支持 `<群号>:<UID>`。  |
+| `protected_admins`             | `true`  | 保护 AstrBot 管理员，避免被黑名单阻断；不限制模型自主沉默。                |
+| `blocked_context_window`       | `20`    | 每次向 LLM 注入的黑名单消息条数上限。                                      |
+| `blocked_context_ttl_seconds`  | `86400` | 黑名单消息的缓存有效期，单位为秒，默认 24 小时。                           |
+| `respect_recall_notice`        | `true`  | 根据撤回通知清理缓存，同时保持通知继续传递。                               |
+| `strict_non_streaming_warning` | `true`  | 检测到可能影响沉默效果的流式输出、工具状态或结果展示设置时，输出日志提醒。 |
+| `debug_log`                    | `false` | 输出调试日志。                                                             |
+
+## 与其他插件配合
+
+| 插件或能力            | 配合方式                                                                                                                                                                                        |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `context_aware`       | 本插件独立保留被忽略用户的临时背景，不依赖或调用 `context_aware` 的清理接口。                                                                                                                   |
+| `wakepro`             | 为已被唤醒的 LLM 提供不回复的选择。本插件黑名单监听优先级为 `100000`，高于此前适配的 `wakepro` 优先级 `99999`。                                                                                 |
+| `recall_cancel`       | 撤回通知会继续传递；本插件 LLM hook 优先级为 `90`，低于此前适配的 `recall_cancel` 优先级 `100`。                                                                                                |
+| 后续消息（follow-up） | 调用 `keep_silent` 结束当前 Agent 前，会释放已捕获但尚未消费的 follow-up，使后续原始事件有机会独立处理。此保护在 `v4.26.8` 完成过验证，依赖 Core 私有 runner 状态，接口不兼容时会记录一次警告。 |
+
+## 使用边界
+
+- 自主沉默作用于模型回复流程，不负责拦截普通用户触发的所有非 LLM 指令；黑名单则在本插件收到消息时拦截后续事件处理。
+- 如果模型没有调用 `keep_silent`，仍可能正常回复。插件提供选择沉默的能力，不能保证每一次社交判断都符合预期。
+- 黑名单上下文用于帮助模型理解后续聊天，实际使用效果仍取决于消息保留范围和模型理解能力。
+- 若其他插件在本插件处理前已经直接发送消息，本插件无法撤回那些内容。
+- 建议保持 `respect_recall_notice` 开启，避免继续把已撤回的消息用作背景。
+
+版本变更见 [CHANGELOG.md](CHANGELOG.md)。
